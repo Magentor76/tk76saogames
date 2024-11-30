@@ -1,0 +1,910 @@
+# include <Siv3D.hpp>
+#include <iostream> // cout, endl, cin
+#include <string> // string, to_string, stoi
+#include <vector> // vector
+#include <algorithm> // min, max, swap, sort, reverse, lower_bound, upper_bound
+#include <utility> // pair, make_pair
+#include <tuple> // tuple, make_tuple
+#include <cstdint> // int64_t, int*_t
+#include <cstdio> // printf
+#include <map> // map
+#include <queue> // queue, priority_queue
+#include <set> // set
+#include <stack> // stack
+#include <deque> // deque
+#include <unordered_map> // unordered_map
+#include <unordered_set> // unordered_set
+#include <bitset> // bitset
+#include <cctype> // isupper, islower, isdigit, toupper, tolower
+#include <regex>
+
+using namespace std;
+
+const int inf = 10000;
+
+const int height = 6;
+const int width = 4;
+//盤面の縦横のながさ
+
+// 汎用的なボタン
+struct button_menu {
+	Rect rect;
+	Font font{ FontMethod::MSDF, 48, Typeface::Bold };
+	String text;
+
+
+	button_menu(const Rect& rects, const String& s) {
+		rect = rects;
+		text = s;
+	}
+
+	void draw_d()const {
+		rect.draw(ColorF{ 0.3, 0.7, 1.0 });
+		font(text).drawAt(40, (rect.x + rect.w / 2), (rect.y + rect.h / 2));
+
+	}
+	bool draw_u() {
+		if (rect.mouseOver())
+		{
+			Cursor::RequestStyle(CursorStyle::Hand);
+		}
+		return rect.leftClicked();
+	}
+
+};
+
+//正方形の情報
+struct Sq {
+	int id = -1; // そこに置かれている駒のid
+	bool untouchable = false; // その駒の情報を変えれないかどうか（基本false）
+};
+
+int dx[4] = { 1,0,-1,0 };
+int dy[4] = { 0,1,0,-1 };
+
+bool is_connected(set<pair<int, int>> C) {
+	if (C.empty()) {
+		return true;
+	}
+	pair<int, int> p = *C.begin();
+	queue<pair<int, int>> que;
+	que.push(p);
+	set<pair<int, int>> cc;
+	cc.insert(p);
+	while (!que.empty()) {
+		pair<int, int> v = que.front();
+		que.pop();
+		for (int i = 0; i < 4; i++) {
+			pair<int, int> nv = make_pair(v.first + dx[i], v.second + dy[i]);
+			if (!C.count(nv)) {
+				continue;
+			}
+			if (cc.count(nv)) {
+				continue;
+			}
+			cc.insert(nv);
+			que.push(nv);
+		}
+	}
+	return C == cc;
+}
+
+struct card {
+public:
+	vector<set<pair<int, int>>> shape = vector<set<pair<int, int>>>(4, {});
+	int len = 0;
+	double sx = 0;
+	double sy = 0;
+	int atk = 0;
+	int dif = 0;
+	bool is_on_click = false;
+	int rotate_deg = 0;
+	card() {
+
+	}
+	card(set<pair<int, int>> c, double ssx = 0, double ssy = 0) {
+		//assert(!c.empty());//空を許さない
+		//やっぱり空を許す
+		if (c.empty()) {
+			shape[0] = c;
+			shape[1] = c;
+			shape[2] = c;
+			shape[3] = c;
+			sx = ssx;
+			sy = ssy;
+			len = 0;
+		}
+		else {
+			assert(is_connected(c));
+			sx = ssx;
+			sy = ssy;
+			len = 0;
+			for (pair<int, int> v : c) {
+				for (int i = 0; i < 4; i++) {
+					pair<int, int> nv = make_pair(v.first + dx[i], v.second + dy[i]);
+					if (!c.count(nv)) {
+						len++;
+					}
+				}
+			}
+			shape[0] = c;
+			set<pair<int, int>> cc = c;
+			for (int i = 0; i < 3; i++) {
+				//(0,0)中心に回転
+				c.clear();
+				for (pair<int, int> j : cc) {
+					pair<int, int> k = make_pair(j.second, -j.first);
+					c.insert(k);
+				}
+				shape[i + 1] = c;
+				cc = c;
+			}
+		}
+	}
+	card draw(double sz_cd, ColorF col) {
+		//一マスの一辺がsz_cdになるようにcardを描画
+		for (pair<int, int> i : shape[rotate_deg]) {
+			RectF{ i.first * sz_cd + sx,i.second * sz_cd + sy,sz_cd }.draw(col);
+		}
+		return *this;
+	}
+	card draw(double sz_cd, HSV col) {
+		for (pair<int, int> i : shape[rotate_deg]) {
+			RectF{ i.first * sz_cd + sx,i.second * sz_cd + sy,sz_cd }.draw(col);
+		}
+		return *this;
+	}
+	card draw(double sz_cd) {
+		for (pair<int, int> i : shape[rotate_deg]) {
+			RectF{ i.first * sz_cd + sx,i.second * sz_cd + sy,sz_cd }.draw(Palette::Orange);
+		}
+		return *this;
+	}
+	bool leftPressed(double sz_cd) {
+		for (pair<int, int> i : shape[rotate_deg]) {
+			//xがi.first*sz_cd+sx～(i.first+1)*sz_cd+sx
+			//yがi.second*sz_cd+sy～(i.second+1)*sz_cd+sy
+			if (MouseL.pressed() && Cursor::PosF().x >= i.first * sz_cd + sx && Cursor::PosF().x <= (i.first + 1) * sz_cd + sx && Cursor::PosF().y >= i.second * sz_cd + sy && Cursor::PosF().y <= (i.second + 1) * sz_cd + sy) {
+				return true;
+			}
+		}
+		return false;
+	}
+	void rotate_right() {
+		rotate_deg++;
+		rotate_deg %= 4;
+	}
+	void rotate_left() {
+		rotate_deg--;
+		if (rotate_deg == -1) {
+			rotate_deg = 3;
+		}
+	}
+	friend bool is_overlap(card c1, card c2) {
+		for (pair<int, int> i : c1.shape[c1.rotate_deg]) {
+			if (c2.shape[c2.rotate_deg].count(make_pair(i.first + c1.sx - c2.sx, i.second + c1.sy - c2.sy))) {
+				return true;
+			}
+		}
+		return false;
+	}
+	card& operator&=(const card& other) {
+		set<pair<int, int>> ans;
+		for (pair<int, int> i : (*this).shape[(*this).rotate_deg]) {
+			//i.first+(*this).sx-other.sx,i.second+(*this.sy)-other.sy
+			if (other.shape[other.rotate_deg].count(make_pair(i.first + (*this).sx - other.sx, i.second + (*this).sy - other.sy))) {
+				ans.insert(i);
+			}
+		}
+		card ans_card(ans, (*this).sx, (*this).sy);
+		(*this) = ans_card;
+		return *this;
+	}
+	card& operator/=(const card& other) {
+		set<pair<int, int>> t = (*this).shape[(*this).rotate_deg];
+		for (pair<int, int> i : (*this).shape[(*this).rotate_deg]) {
+			if (other.shape[other.rotate_deg].count(i)) {
+				t.erase(i);
+			}
+		}
+		card u(t, (*this).sx, (*this).sy);
+		(*this) = u;
+		return *this;
+	}
+	card& operator /=(const pair<int, int>& other) {
+		set<pair<int, int>> t = (*this).shape[(*this).rotate_deg];
+		if (t.count(other)) {
+			t.erase(other);
+		}
+		card u(t, (*this).sx, (*this).sy);
+		(*this) = u;
+		return *this;
+	}
+	card& operator+=(const card& other) {
+		set<pair<int, int>> ans = (*this).shape[(*this).rotate_deg];
+		for (pair<int, int> i : other.shape[other.rotate_deg]) {
+			ans.insert(make_pair(i.first + other.sx - (*this).sx, i.second + other.sy - (*this).sy));
+		}
+		if (ans.empty()) {
+			return *this;
+		}
+
+		card ncard(ans, (*this).sx, (*this).sy);
+		(*this) = ncard;
+		return *this;
+	}
+	card& operator+=(const pair<int, int>& other) {
+		set<pair<int, int>> ans = (*this).shape[(*this).rotate_deg];
+		ans.insert(other);
+		assert(is_connected(ans));
+		card u(ans, (*this).sx, (*this).sy);
+		(*this) = u;
+		return *this;
+	}
+	card operator+(const card& r) const {
+		return card(*this) += r;
+	}
+	friend card operator+(const card& l, const pair<int, int>& r) {
+		return card(l) += r;
+	}
+	friend card operator+(const pair<int, int>& l, const card& r) {
+		return card(r) += l;
+	}
+	card operator/(const card& r) const {
+		return card(*this) /= r;
+	}
+	friend card operator/(const card& l, const pair<int, int>& r) {
+		return card(l) /= r;
+	}
+};
+
+
+//置かれているカードの情報(カード情報/位置/先 or 後のカードか/置くことを確定させたか/回転回数)
+struct cardcomp {
+	card card;
+	pair<int, int> pos;
+	int turn;
+	bool used = false;
+	int rot = 0;
+};
+
+card emp;
+//盤面の大きさに関するやつ
+namespace boardpos {
+	int board_x = 20;
+	int board_y = 20;
+	int board_width = 700;
+	int board_height = 400;
+	int surface = 10;
+}
+
+// type==0 : マウスが盤面上で触れているカードのidを返す(number)
+struct mousestate {
+	int type = -1;
+	int number = 0;
+};
+
+//共通データ
+struct GameData {
+	vector<card> deck1;
+	vector<card> deck2;
+	mousestate mst;
+};
+using App = SceneManager<String, GameData>;
+
+struct board {
+
+	map<pair<int, int>, Sq> type;// マスの集合と、現在のマスの状態を表すもの(ex:設置可能か、どのidのカードが置いてあるかなど)
+	map<int, cardcomp> st; // カードのidごとに、そのカードの情報(cardcomp型)を格納している
+	Point ctr; // 実際に描画する時の「中心」の座標を決める
+	int id = 0;
+	pair<double, double> pos_cd = pair(0, 0);
+	double sz_cd = 0;
+
+	//正方形追加
+	bool add_sq(pair<int, int> a) {
+		if (type.count(a)) { return false; }
+		Sq  s;
+		s.id = -1;
+		s.untouchable = false;
+		type[a] = s;
+		return true;
+	}
+
+	bool incard(int player, card card, pair<int, int> pos, int rot) {
+		cardcomp cd;
+		cd.card = card;
+		cd.pos = pos;
+		cd.turn = player;
+		cd.rot = rot;
+		for (auto u : card.shape[rot]) {
+			if (!type.count(pair(u.first + pos.first, u.second + pos.second)) || type[pair(u.first + pos.first, u.second + pos.second)].untouchable || type[pair(u.first + pos.first, u.second + pos.second)].id != -1) { return false; }
+		}
+		for (auto u : card.shape[rot]) {
+			type[pair(u.first + pos.first, u.second + pos.second)].id = id;
+		}
+
+		st[id] = cd;
+		id++;
+		// 先行or後攻,置くカードの種類、「中心」のマスを決めた時、そこにカードを仮に置く。
+	}
+	bool outcard(pair<int, int> pos, card& ret) {
+		if (!type.count(pos)) { return false; }//emp はなんもないカード.
+		int card_id = type[pos].id;
+		ret = st[card_id].card;
+		for (auto u : ret.shape[st[card_id].rot]) {
+			type[pair(u.first + pos.first, u.second + pos.second)].id = -1;
+		}
+		return true;
+
+	}
+
+	pair<int, vector<pair<int, int>>> calc(int turn) {
+		vector<pair<int, int>> scoreplus;//id and delta
+		int scoresum = 0;
+		for (auto& u : st) {
+			auto card_obj = u.second; //cardcomp型
+			if (card_obj.used = false && card_obj.turn == turn) {
+				int sumdelta = 0;
+				for (auto card_obj_sq : card_obj.card.shape[card_obj.rot]) {
+					int sq_x = card_obj_sq.first + card_obj.pos.first;
+					int sq_y = card_obj_sq.second + card_obj.pos.second;
+					vector<int> dx = { 1,-1,0,0 };
+					vector<int> dy = { 0,0,1,-1 };
+					for (int dir = 0; dir < 4; dir++) {
+						if (type.count(pair(sq_x + dx[dir], sq_y + dy[dir]))) {
+							auto now_sq = type[pair(sq_x + dx[dir], sq_y + dy[dir])];//隣接マスを見たいお気持ち
+							if (now_sq.id != -1 && now_sq.id == u.first) { continue; }
+							if (now_sq.id == -1) {
+								sumdelta += 1;
+							}
+							else {
+								sumdelta += 2;
+							}
+						}
+					}
+				}
+				int lstscore = sumdelta * card_obj.card.atk / (2 * card_obj.card.len);
+				scoresum += lstscore;
+				scoreplus.push_back(pair(u.first, lstscore));
+			}
+			if (card_obj.turn != turn) {
+				int sumdelta = 0;
+				for (auto card_obj_sq : card_obj.card.shape[card_obj.rot]) {
+					int sq_x = card_obj_sq.first + card_obj.pos.first;
+					int sq_y = card_obj_sq.second + card_obj.pos.second;
+					vector<int> dtx = { 1,-1,0,0 };
+					vector<int> dty = { 0,0,1,-1 };
+					for (int dir = 0; dir < 4; dir++) {
+						if (type.count(pair(sq_x + dtx[dir], sq_y + dty[dir]))) {
+							auto now_sq = type[pair(sq_x + dtx[dir], sq_y + dty[dir])];//隣接マスを見たいお気持ち
+							if (now_sq.id != -1 && st[now_sq.id].used == false) {
+								sumdelta += 2;
+							}
+
+						}
+					}
+				}
+				int lstscore = sumdelta * card_obj.card.dif / (2 * card_obj.card.len);
+				scoresum -= lstscore;
+				scoreplus.push_back(pair(u.first, lstscore));
+			}
+
+
+		}
+
+
+		auto chk = [&](int a, int b, pair<int, int> pos_sq) {
+
+			if ((type.count(pair(pos_sq.first + a, pos_sq.second + b)) && type[pair(pos_sq.first + a, pos_sq.second + b)].id != -1)) {
+				return true;
+			}
+			else {
+				return false;
+			}
+			};
+		for (auto u : type) {
+
+			pair<int, int> pos_sq = u.first;
+			for (int aa = 0; aa < 2; aa++) {
+				for (int bb = 0; bb < 2; bb++) {
+					if (chk(0 + aa, 0 + bb, pos_sq) || chk(0 + aa, -1 + bb, pos_sq) || chk(-1 + aa, 0 + bb, pos_sq) || chk(-1 + aa, -1 + bb, pos_sq)) { Circle{ exch_x(pos_sq.first + aa), exch_y(pos_sq.second + bb),round(0.05 * sz_cd) }.draw(Palette::Black); }
+					else { Circle{ exch_x(pos_sq.first + aa), exch_y(pos_sq.second + bb),round(0.05 * sz_cd) }.draw(Palette::Lightgray); }
+				}
+			}
+
+
+
+		}
+
+
+		return pair(scoresum, scoreplus);
+	}
+
+	const RenderTexture BoardTexture{ Size{ 800, 600 }, Palette::White };
+
+	pair<int, int> marked = pair(inf, inf);
+
+	void calc_for_draw(GameData data) {
+		bool statechanged = false;
+
+		int xmin = inf; int xmax = -inf;
+		int ymin = inf; int ymax = -inf;
+		for (auto u : type) {
+			auto pos_sq = u.first;
+			xmin = min(xmin, pos_sq.first);
+			xmax = max(xmax, pos_sq.first + 1);
+			ymin = min(ymin, pos_sq.second);
+			ymax = max(ymax, pos_sq.second + 1);
+		}
+		double sz_new = min((double)(boardpos::board_width - 2 * boardpos::surface) / (xmax - xmin), (double)(boardpos::board_height - 2 * boardpos::surface) / (ymax - ymin));
+		pair<double, double> pos_new = pair((xmin + xmax) / 2.0, (ymin + ymax) / 2.0);
+		sz_cd += (sz_new - sz_cd) / 10;
+		pos_cd.first += (pos_new.first - pos_cd.first) / 10;
+		pos_cd.second += (pos_new.second - pos_cd.second) / 10;
+
+		auto px = Cursor::PosF().x;
+		auto py = Cursor::PosF().y;
+		px -= boardpos::board_width / 2 + 2 * boardpos::surface;
+		py -= boardpos::board_height / 2 + 2 * boardpos::surface;
+		px /= sz_cd;
+		py /= sz_cd;
+		px += pos_cd.first;
+		py += pos_cd.second;
+
+
+		for (auto u : type) {
+			if (u.first.first <= px && px <= u.first.first + 1 && u.first.second <= py && py <= u.first.second + 1) {
+				data.mst.type = 0; data.mst.number = u.second.id; marked = u.first;
+
+				statechanged = true;
+			}
+		}
+
+
+		if (!statechanged) { data.mst.type = -1; marked = pair(inf, inf); }
+	}
+
+	int32 exch_x(int pt) const { // 管理上座標->画面上座標
+		double ps = pt;
+		ps -= pos_cd.first;
+
+		ps *= sz_cd;
+
+		ps += boardpos::board_width / 2;
+		//ps.first += boardpos::board_y + boardpos::board_height / 2;
+		return round(ps);
+	}
+	int32 exch_y(int pt) const {
+		double ps = pt;
+		//ps.first -= pos_cd.first;
+		ps -= pos_cd.second;
+		//ps.first *= sz_cd;
+		ps *= sz_cd;
+		//ps.first += boardpos::board_x + boardpos::board_width / 2;
+		ps += boardpos::board_height / 2;
+		return round(ps);
+	}
+
+	pair<double, double> mouse_pos() const {
+
+		auto px = Cursor::PosF().x;
+		auto py = Cursor::PosF().y;
+		px -= boardpos::board_width / 2 + 2 * boardpos::surface;
+		py -= boardpos::board_height / 2 + 2 * boardpos::surface;
+		px /= sz_cd;
+		py /= sz_cd;
+		px += pos_cd.first;
+		py += pos_cd.second;
+		//Print << pair(px, py);
+		return pair(px, py);
+	}
+
+	pair<double, double> mouse_pos() {
+		//同上
+		auto px = Cursor::PosF().x;
+		auto py = Cursor::PosF().y;
+		px -= boardpos::board_width / 2 + 2 * boardpos::surface;
+		py -= boardpos::board_height / 2 + 2 * boardpos::surface;
+		px /= sz_cd;
+		py /= sz_cd;
+		px += pos_cd.first;
+		py += pos_cd.second;
+		//Print << pair(px, py);
+		return pair(px, py);
+	}
+
+	bool check_id(int& ret) {//マウスが乗ってるマスのid
+		if (type.count(pair(floor(mouse_pos().first), floor(mouse_pos().second)))) {
+			ret = type[pair(floor(mouse_pos().first), floor(mouse_pos().second))].id; return true;
+		}
+		else {
+			ret = -1; return false;
+		}
+	}
+
+
+	void draw(int turn, bool prev = false, card ca = {}, int rot = 0) const {// ca -> pre-viewさせたいカード
+
+
+		BoardTexture.clear(Palette::White);
+		{
+			const ScopedRenderTarget2D target{ BoardTexture };
+			auto typen = type;
+			auto stn = st;
+			for (auto u : type) {
+				pair<int, int> pos_sq = u.first;
+				//Print << mouse_pos();
+
+
+				{
+					// used
+
+
+					if (u.second.id == -1) {
+						Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ U"#556b2f" });
+					}
+					else {
+						if (stn[u.second.id].turn == 0) {
+							if (stn[u.second.id].used) {
+								Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ U"#dc143c" });
+							}
+							else {
+								Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ U"#db8495" });
+							}
+						}
+						else {
+							if (stn[u.second.id].used) {
+								Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ U"#009adb" });
+							}
+							else {
+								Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ U"#6ebadb" });
+							}
+						}
+					}
+
+
+					if (marked == pos_sq) {
+						Rect{ exch_x(pos_sq.first), exch_y(pos_sq.second),exch_x(pos_sq.first + 1) - exch_x(pos_sq.first), exch_y(1 + pos_sq.second) - exch_y(pos_sq.second) }.draw(ColorF{ 0,0,0,0.125 });
+					}
+				}
+
+
+
+				//Rect{ floor(exch_x(pos_sq.first)),2,3,4 }.draw();
+
+
+
+
+
+			}
+
+
+
+			if (prev) {
+				bool settidekiru = true;
+				for (auto u : ca.shape[rot]) {
+					if (!type.count(pair(u.first + floor(mouse_pos().first), u.second + floor(mouse_pos().second))) || typen[pair((int)(u.first + floor(mouse_pos().first)), (int)(u.second + floor(mouse_pos().second)))].untouchable || typen[pair((int)(u.first + floor(mouse_pos().first)), (int)(u.second + floor(mouse_pos().second)))].id != -1) { settidekiru = false; }
+				}
+				if (settidekiru) {
+					for (auto u : ca.shape[rot]) {
+						Rect{ exch_x(u.first + floor(mouse_pos().first)), exch_y(u.second + floor(mouse_pos().second)),(int32)(round(sz_cd)),(int32)(round(sz_cd)) }.draw(Palette::Yellow);
+					}
+				}
+			}
+
+
+			for (auto u : type) {
+				pair<int, int> pos_sq = u.first;
+				// 枠の描画
+
+				if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pair(pos_sq.first, pos_sq.second))].id != -1) && (type.count(pair(pos_sq.first - 1, pos_sq.second)) && typen[pair(pair(pos_sq.first - 1, pos_sq.second))].id != -1) && typen[pair(pos_sq.first, pos_sq.second)].id == typen[pair(pos_sq.first - 1, pos_sq.second)].id) {
+
+				}
+				else if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pair(pos_sq.first, pos_sq.second))].id != -1) || (type.count(pair(pos_sq.first - 1, pos_sq.second)) && typen[pair(pair(pos_sq.first - 1, pos_sq.second))].id != -1)) {
+					Line{ exch_x(pos_sq.first), exch_y(pos_sq.second), exch_x(pos_sq.first), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Black);
+				}
+				else {
+					Line{ exch_x(pos_sq.first), exch_y(pos_sq.second), exch_x(pos_sq.first), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Lightgray);
+				}
+
+				if (!type.count(pair(pos_sq.first + 1, pos_sq.second))) {
+					if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pair(pos_sq.first, pos_sq.second))].id != -1) || (type.count(pair(pos_sq.first + 1, pos_sq.second)) && typen[pair(pair(pos_sq.first + 1, pos_sq.second))].id != -1)) {
+						Line{ exch_x(pos_sq.first + 1), exch_y(pos_sq.second), exch_x(pos_sq.first + 1), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Black);
+					}
+					else {
+						Line{ exch_x(pos_sq.first + 1), exch_y(pos_sq.second), exch_x(pos_sq.first + 1), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Lightgray);
+					}
+				}
+
+
+
+				if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pair(pos_sq.first, pos_sq.second))].id != -1) && (type.count(pair(pos_sq.first, pos_sq.second - 1)) && typen[pair(pair(pos_sq.first, pos_sq.second - 1))].id != -1) && typen[pair(pair(pos_sq.first, pos_sq.second))].id == typen[pair(pair(pos_sq.first, pos_sq.second - 1))].id) {}
+				else if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pos_sq.first, pos_sq.second)].id != -1) || (type.count(pair(pos_sq.first, pos_sq.second - 1)) && typen[pair(pair(pos_sq.first, pos_sq.second - 1))].id != -1)) { Line{ exch_x(pos_sq.first), exch_y(pos_sq.second), exch_x(pos_sq.first + 1), exch_y(pos_sq.second) }.draw(round(0.05 * sz_cd), Palette::Black); }
+				else { Line{ exch_x(pos_sq.first), exch_y(pos_sq.second), exch_x(pos_sq.first + 1), exch_y(pos_sq.second) }.draw(round(0.05 * sz_cd), Palette::Lightgray); }
+
+				if (!type.count(pair(pos_sq.first, pos_sq.second + 1))) {
+					if ((type.count(pair(pos_sq.first, pos_sq.second)) && typen[pair(pair(pos_sq.first, pos_sq.second))].id != -1) || (type.count(pair(pos_sq.first, pos_sq.second + 1)) && typen[pair(pair(pos_sq.first, pos_sq.second + 1))].id != -1)) { Line{ exch_x(pos_sq.first), exch_y(pos_sq.second + 1), exch_x(pos_sq.first + 1), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Black); }
+					else { Line{ exch_x(pos_sq.first), exch_y(pos_sq.second + 1), exch_x(pos_sq.first + 1), exch_y(pos_sq.second + 1) }.draw(round(0.05 * sz_cd), Palette::Lightgray); }
+				}
+			}
+
+
+			auto chk = [&](int a, int b, pair<int, int> pos_sq) {
+
+				if ((type.count(pair(pos_sq.first + a, pos_sq.second + b)) && typen[pair(pos_sq.first + a, pos_sq.second + b)].id != -1)) {
+					return true;
+				}
+				else {
+					return false;
+				}
+				};
+			
+			//Circle{exch_x(pos_cd.first),exch_y(pos_cd.second),30}.draw(Palette::Greenyellow);
+
+		}
+		//BoardTexture.draw(0,0);
+		const RoundRect roundRect{ 20, 20, boardpos::board_width, boardpos::board_height, 25 };
+		roundRect.draw(HSV{ 0, 0.5, 1.0 });
+		// テクスチャの (90, 5) から幅 110 高さ 110 の領域を、roundRect に貼り付けて描画
+		roundRect(BoardTexture(0, 0, boardpos::board_width, boardpos::board_height)).draw();
+
+		//カードを設置終わりにする
+		for (auto& u : st) {
+			auto card_obj = u.second; //cardcomp型
+			if (card_obj.used = false) {
+				card_obj.used = true;
+			}
+		}
+	}
+
+};
+
+
+// タイトルシーン
+
+
+
+
+
+class Title : public App::Scene
+{
+public:
+
+	button_menu button_start = { Rect{ 250, 300, 300, 80 },U"開始" };
+
+	// コンストラクタ
+	Title(const InitData& init)
+		: IScene{ init }
+	{
+
+	}
+
+	void update() override
+	{
+
+		if (button_start.draw_u()) {
+			changeScene(U"Home");
+		}
+	}
+
+	void draw() const override
+	{
+		button_start.draw_d();
+		Scene::SetBackground(ColorF{ 255, 0, 0 });
+	}
+
+
+
+};
+
+// ホーム画面(タイトルではないことに注意！メニュー画面です)
+class Home : public App::Scene
+{
+public:
+	button_menu button_game = { Rect{ 250, 200, 300, 80 },U"ゲーム" };
+	button_menu button_select = { Rect{ 250, 300, 300, 80 },U"カード選択" };
+	button_menu button_settings = { Rect{ 250, 400, 300, 80 },U"設定" };
+	// コンストラクタ
+	Home(const InitData& init)
+		: IScene{ init }
+	{
+
+	}
+
+	void update() override
+	{
+		if (button_game.draw_u()) {
+			changeScene(U"Game");
+		}
+		if (button_select.draw_u()) {
+			changeScene(U"Select");
+		}
+		if (button_settings.draw_u()) {
+			changeScene(U"Settings");
+		}
+	}
+
+	void draw() const override
+	{
+		Scene::SetBackground(ColorF{ 0, 255, 0 });
+		button_game.draw_d();
+		button_select.draw_d();
+		button_settings.draw_d();
+	}
+};
+
+
+// 設定
+class Settings : public App::Scene
+{
+public:
+
+	// コンストラクタ
+	Settings(const InitData& init)
+		: IScene{ init }
+	{
+
+	}
+
+	void update() override
+	{
+
+	}
+
+	void draw() const override
+	{
+
+	}
+};
+
+// カード選択シーン
+class Select : public App::Scene
+{
+public:
+
+	// コンストラクタ
+	Select(const InitData& init)
+		: IScene{ init }
+	{
+
+	}
+
+	void update() override
+	{
+
+	}
+
+	void draw() const override
+	{
+
+	}
+};
+
+// ゲーム本編(重要)
+class Game : public App::Scene
+{
+public:
+
+	board board;
+	card D, E, F;
+	vector<card> vec = vector<card>(3);
+	int turn = 0;
+	int state = 0;//0:平常時 1:カードを新しく引いている途中 2:攻撃処理中
+	// コンストラクタ
+	Game(const InitData& init)
+		: IScene{ init }
+	{
+		for (int i = 0; i <= height; i++) {
+			for (int j = 0; j <= width; j++) {
+				board.add_sq(pair(i, j));
+			}
+		}
+		set<pair<int, int>> C;
+		C.insert(make_pair(0, 0));
+		C.insert(make_pair(0, 1));
+		C.insert(make_pair(1, 0));
+		C.insert(make_pair(-1, 0));
+		card D(C, 100, 430);
+		//D.draw(board.sz_cd, ColorF{ 1.0, 0.54901960784, 0.0 });
+		C.clear();
+		C.insert(make_pair(0, 0));
+		C.insert(make_pair(1, 0));
+		C.insert(make_pair(1, 1));
+		card E(C, 280, 430);
+		//E.draw(board.sz_cd, ColorF{ 1.0, 0.54901960784, 0.0 });
+		C.clear();
+		C.insert(make_pair(0, 0));
+		C.insert(make_pair(1, 0));
+		C.insert(make_pair(2, 0));
+		C.insert(make_pair(2, 1));
+		card F(C, 460, 430);
+		//F.draw(board.sz_cd, ColorF{ 1.0, 0.54901960784, 0.0 });
+		vec[0] = D;
+		vec[1] = E;
+		vec[2] = F;
+		//vec ren atk dif
+	}
+
+	void update() override
+	{
+		//ClearPrint();
+		//if (rand() % 100 == 0) { board.add_sq(pair(rand() % 20 - 10, rand() % 20 - 10)); }
+		board.calc_for_draw(getData());
+		for (int i = 0; i < vec.size(); i++) {
+			if (vec[i].leftPressed(board.sz_cd)) {
+				vec[i].sx = Cursor::PosF().x - board.sz_cd / 2;
+				vec[i].sy = Cursor::PosF().y - board.sz_cd / 2;
+				vec[i].is_on_click = true;
+				if (vec[i].is_on_click && KeyQ.pressed()) {
+					auto mousex = floor(board.mouse_pos().first);
+					auto mousey = floor(board.mouse_pos().second);
+					if (board.incard(0, vec[i], pair(mousex, mousey), 0)) {
+						vec.erase(vec.begin() + i);
+					}
+					else {
+						
+					}
+				}
+				else {
+					
+				}
+			}
+			else {
+				vec[i].is_on_click = false;
+			}
+		}
+
+		if (KeyW.pressed()) {
+			auto mousex = floor(board.mouse_pos().first);
+			auto mousey = floor(board.mouse_pos().second);
+			card C;
+			if (board.outcard(pair(mousex, mousey), C)) {
+				vec.push_back(C);
+			}
+			else {
+
+			}
+		}
+		if (KeyEnter.pressed()) {
+			board.calc(0);
+		}
+	}
+
+	void draw() const override
+	{
+		board.draw(0);
+		for (int i = 0; i < vec.size(); i++) {
+			card T = vec[i];
+			T.draw(board.sz_cd, ColorF{ 1.0, 0.54901960784, 0.0 });
+		}
+	}
+};
+
+
+
+void Main()
+{
+
+	Scene::SetBackground(ColorF{ 0, 0, 0 });
+
+	// シーンマネージャーを作成
+	App manager;
+
+
+	manager.add<Title>(U"Title");
+	manager.add<Home>(U"Home");
+	manager.add<Settings>(U"Settings");
+	manager.add<Select>(U"Select");
+	manager.add<Game>(U"Game");
+
+	while (System::Update())
+	{
+		// 現在のシーンを実行
+		// シーンに実装した .update() と .draw() が実行される
+		if (not manager.update())
+		{
+			break;
+		}
+	}
+}
